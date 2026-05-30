@@ -7,6 +7,7 @@ import json
 import math
 from datetime import datetime
 from io import BytesIO
+import plotly.graph_objects as go
 
 # ─── Page Config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -531,71 +532,118 @@ def render_gauge(confidence, is_diabetic):
     """
     return svg
 
-# ─── Helper: Bar Chart SVG ────────────────────────────────────────────────────
+# ─── Helper: Bar Chart (Plotly) ──────────────────────────────────────────────
 def render_bar_chart(values_dict):
-    keys = list(values_dict.keys())
+    decimal_fields = {"BMI", "DiabetesPedigreeFunction"}
+    FIELD_ORDER = ["Glucose","BloodPressure","SkinThickness",
+                   "Insulin","BMI","DiabetesPedigreeFunction","Age"]
     short_labels = {
-        'Glucose': 'Glucose', 'BloodPressure': 'BP', 'SkinThickness': 'Skin',
-        'Insulin': 'Insulin', 'BMI': 'BMI', 'DiabetesPedigreeFunction': 'DPF', 'Age': 'Age'
+        "Glucose": "Glucose\n(mg/dL)",
+        "BloodPressure": "Blood\nPressure\n(mmHg)",
+        "SkinThickness": "Skin\nThickness\n(mm)",
+        "Insulin": "Insulin\n(mU/L)",
+        "BMI": "BMI\n(kg/m²)",
+        "DiabetesPedigreeFunction": "Diabetes\nPedigree",
+        "Age": "Age\n(yrs)"
     }
-    w, h = 560, 320
-    left, right, top, bottom = 50, 30, 30, 80
-    chart_w = w - left - right
-    chart_h = h - top - bottom
-    n = len(keys)
-    bar_w = min(50, chart_w // n - 12)
-    gap = (chart_w - n * bar_w) // (n + 1)
+    labels, user_vals, colors, hover_texts = [], [], [], []
+    norm_mins, norm_maxs = [], []
 
-    bars_svg = ""
-    for i, key in enumerate(keys):
-        val = values_dict[key]
+    for key in FIELD_ORDER:
+        val = values_dict.get(key, FIELD_DEFAULTS[key])
         norm_min, norm_max, unit = NORMAL_RANGES[key]
-        norm_mid = (norm_min + norm_max) / 2
-        max_val = max(val * 1.3, norm_max * 1.4, 1)
-        user_h = min((val / max_val) * chart_h, chart_h)
-        norm_h = min((norm_max / max_val) * chart_h, chart_h)
-        x = left + gap + i * (bar_w + gap)
-        y_user = top + chart_h - user_h
-        y_norm = top + chart_h - norm_h
-        # Color: gold if within range, red if above, blue if below
+        labels.append(short_labels[key])
+        user_vals.append(val)
+        norm_mins.append(norm_min)
+        norm_maxs.append(norm_max)
         if val > norm_max:
-            bar_color = "#dc3545"
+            colors.append("#ef4444")
+            status = "⬆ Above Normal"
         elif val < norm_min:
-            bar_color = "#7fb3ff"
+            colors.append("#60a5fa")
+            status = "⬇ Below Normal"
         else:
-            bar_color = "#28c864"
-        label = short_labels.get(key, key)
-        bars_svg += f"""
-          <!-- Normal range bar (background) -->
-          <rect x="{x}" y="{y_norm:.1f}" width="{bar_w}" height="{norm_h:.1f}" fill="rgba(245,197,24,0.15)" rx="4"/>
-          <!-- User value bar -->
-          <rect x="{x}" y="{y_user:.1f}" width="{bar_w}" height="{user_h:.1f}" fill="{bar_color}" rx="4" opacity="0.9"/>
-          <!-- Value label -->
-          <text x="{x + bar_w/2:.1f}" y="{y_user - 5:.1f}" fill="{bar_color}" font-size="10" font-family="Inter,sans-serif" text-anchor="middle" font-weight="bold">{val:.0f}</text>
-          <!-- Field label -->
-          <text x="{x + bar_w/2:.1f}" y="{top + chart_h + 18}" fill="#c8a84b" font-size="11" font-family="Inter,sans-serif" text-anchor="middle">{label}</text>
-          <text x="{x + bar_w/2:.1f}" y="{top + chart_h + 32}" fill="#888" font-size="9" font-family="Inter,sans-serif" text-anchor="middle">{unit}</text>
-        """
-    legend_svg = f"""
-      <rect x="{left}" y="{h - 15}" width="12" height="10" fill="rgba(245,197,24,0.3)" rx="2"/>
-      <text x="{left + 16}" y="{h - 6}" fill="#c8a84b" font-size="10" font-family="Inter,sans-serif">Normal Range</text>
-      <rect x="{left + 110}" y="{h - 15}" width="12" height="10" fill="#28c864" rx="2"/>
-      <text x="{left + 126}" y="{h - 6}" fill="#28c864" font-size="10" font-family="Inter,sans-serif">Your Value (Normal)</text>
-      <rect x="{left + 260}" y="{h - 15}" width="12" height="10" fill="#dc3545" rx="2"/>
-      <text x="{left + 276}" y="{h - 6}" fill="#dc3545" font-size="10" font-family="Inter,sans-serif">Above Normal</text>
-      <rect x="{left + 370}" y="{h - 15}" width="12" height="10" fill="#7fb3ff" rx="2"/>
-      <text x="{left + 386}" y="{h - 6}" fill="#7fb3ff" font-size="10" font-family="Inter,sans-serif">Below Normal</text>
-    """
-    svg = f"""
-    <svg viewBox="0 0 {w} {h}" xmlns="http://www.w3.org/2000/svg" width="100%" style="max-width:{w}px">
-      <rect width="{w}" height="{h}" fill="rgba(15,20,40,0.7)" rx="14"/>
-      <!-- Baseline -->
-      <line x1="{left}" y1="{top + chart_h}" x2="{w - right}" y2="{top + chart_h}" stroke="rgba(245,197,24,0.25)" stroke-width="1"/>
-      {bars_svg}
-      {legend_svg}
-    </svg>
-    """
-    return svg
+            colors.append("#22c55e")
+            status = "✓ Normal"
+        val_str = f"{val:.2f}" if key in decimal_fields else f"{val:.0f}"
+        hover_texts.append(
+            f"<b>{key}</b><br>"
+            f"Your Value: <b>{val_str} {unit}</b><br>"
+            f"Normal Range: {norm_min}–{norm_max} {unit}<br>"
+            f"Status: {status}"
+        )
+
+    fig = go.Figure()
+
+    # Normal range band (as error bars visual — use shape boxes)
+    for i, key in enumerate(FIELD_ORDER):
+        norm_min, norm_max, unit = NORMAL_RANGES[key]
+        fig.add_shape(
+            type="rect",
+            x0=i - 0.4, x1=i + 0.4,
+            y0=norm_min, y1=norm_max,
+            fillcolor="rgba(245,197,24,0.15)",
+            line=dict(color="rgba(245,197,24,0.5)", width=1),
+            layer="below"
+        )
+
+    # User value bars
+    fig.add_trace(go.Bar(
+        x=list(range(len(FIELD_ORDER))),
+        y=user_vals,
+        marker_color=colors,
+        marker_opacity=0.9,
+        marker_line=dict(width=0),
+        hovertemplate="%{customdata}<extra></extra>",
+        customdata=hover_texts,
+        width=0.5,
+        showlegend=False,
+    ))
+
+    # Legend traces (dummy, for legend only)
+    fig.add_trace(go.Bar(x=[None], y=[None], marker_color="rgba(245,197,24,0.3)",
+                         name="Normal Range Band", showlegend=True))
+    fig.add_trace(go.Bar(x=[None], y=[None], marker_color="#22c55e",
+                         name="✓ Normal", showlegend=True))
+    fig.add_trace(go.Bar(x=[None], y=[None], marker_color="#ef4444",
+                         name="⬆ Above Normal", showlegend=True))
+    fig.add_trace(go.Bar(x=[None], y=[None], marker_color="#60a5fa",
+                         name="⬇ Below Normal", showlegend=True))
+
+    fig.update_layout(
+        paper_bgcolor="rgba(15,20,40,0.0)",
+        plot_bgcolor="rgba(15,20,40,0.85)",
+        font=dict(family="Inter, sans-serif", color="#c8cdd8"),
+        margin=dict(l=40, r=20, t=20, b=10),
+        height=340,
+        xaxis=dict(
+            tickmode="array",
+            tickvals=list(range(len(FIELD_ORDER))),
+            ticktext=labels,
+            tickfont=dict(size=11, color="#c8a84b"),
+            gridcolor="rgba(245,197,24,0.08)",
+            linecolor="rgba(245,197,24,0.3)",
+        ),
+        yaxis=dict(
+            gridcolor="rgba(245,197,24,0.1)",
+            tickfont=dict(size=10, color="#888"),
+            linecolor="rgba(245,197,24,0.2)",
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom", y=-0.35,
+            xanchor="center", x=0.5,
+            font=dict(size=11, color="#c8cdd8"),
+            bgcolor="rgba(0,0,0,0)",
+        ),
+        bargap=0.3,
+        hoverlabel=dict(
+            bgcolor="#1e2a3a",
+            bordercolor="#f5c518",
+            font=dict(size=12, color="#f0e6c0"),
+        ),
+    )
+    return fig
 
 # ─── Helper: Generate Text Report (for download) ──────────────────────────────
 def generate_text_report(values_dict, prediction, confidence, timestamp):
@@ -777,7 +825,12 @@ if st.button(L["predict_btn"]):
             prediction = model.predict(arr)[0]
             proba = model.predict_proba(arr)[0]
             confidence = round(proba[prediction] * 100, 1)
+            risk_pct = round(proba[1] * 100, 1)  # always diabetes risk probability
             timestamp = datetime.now().strftime("%d %b %Y, %I:%M %p")
+            # Ensure chart dict has all 7 fields in correct order
+            FIELD_ORDER = ['Glucose','BloodPressure','SkinThickness',
+                           'Insulin','BMI','DiabetesPedigreeFunction','Age']
+            chart_vals = {k: float(current_vals_dict.get(k, FIELD_DEFAULTS[k])) for k in FIELD_ORDER}
 
             # Save to history
             st.session_state.history.append({
@@ -811,14 +864,14 @@ if st.button(L["predict_btn"]):
 
             # ── 📊 Risk Gauge ──
             st.markdown(f"### {L['risk_gauge']}")
-            gauge_svg = render_gauge(confidence, prediction == 1)
+            gauge_svg = render_gauge(risk_pct, prediction == 1)
             st.markdown(f'<div class="gauge-wrap">{gauge_svg}</div>', unsafe_allow_html=True)
 
             # ── 📈 Value vs Normal Range Chart ──
             if current_vals_dict:
                 st.markdown(f"### {L['value_chart']}")
-                chart_svg = render_bar_chart(current_vals_dict)
-                st.markdown(chart_svg, unsafe_allow_html=True)
+                chart_fig = render_bar_chart(chart_vals)
+                st.plotly_chart(chart_fig, use_container_width=True, config={"displayModeBar": False})
 
             # ── Precautions / Tips ──
             if prediction == 1:
