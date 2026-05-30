@@ -532,118 +532,145 @@ def render_gauge(confidence, is_diabetic):
     """
     return svg
 
-# ─── Helper: Bar Chart (Plotly) ──────────────────────────────────────────────
+# ─── Helper: Bar Chart (Plotly Subplots) ─────────────────────────────────────
 def render_bar_chart(values_dict):
+    from plotly.subplots import make_subplots
+
     decimal_fields = {"BMI", "DiabetesPedigreeFunction"}
     FIELD_ORDER = ["Glucose","BloodPressure","SkinThickness",
                    "Insulin","BMI","DiabetesPedigreeFunction","Age"]
-    short_labels = {
-        "Glucose": "Glucose\n(mg/dL)",
-        "BloodPressure": "Blood\nPressure\n(mmHg)",
-        "SkinThickness": "Skin\nThickness\n(mm)",
-        "Insulin": "Insulin\n(mU/L)",
-        "BMI": "BMI\n(kg/m²)",
-        "DiabetesPedigreeFunction": "Diabetes\nPedigree",
-        "Age": "Age\n(yrs)"
+    titles = {
+        "Glucose":                  "🩸 Glucose",
+        "BloodPressure":            "💓 Blood Pressure",
+        "SkinThickness":            "📏 Skin Thickness",
+        "Insulin":                  "💉 Insulin",
+        "BMI":                      "⚖️ BMI",
+        "DiabetesPedigreeFunction": "🧬 Pedigree",
+        "Age":                      "🎂 Age",
     }
-    labels, user_vals, colors, hover_texts = [], [], [], []
-    norm_mins, norm_maxs = [], []
+    units = {k: NORMAL_RANGES[k][2] for k in FIELD_ORDER}
 
-    for key in FIELD_ORDER:
-        val = values_dict.get(key, FIELD_DEFAULTS[key])
+    fig = make_subplots(
+        rows=1, cols=7,
+        subplot_titles=[titles[k] for k in FIELD_ORDER],
+        horizontal_spacing=0.03,
+    )
+
+    for i, key in enumerate(FIELD_ORDER):
+        col_num = i + 1
+        val = float(values_dict.get(key, FIELD_DEFAULTS[key]))
         norm_min, norm_max, unit = NORMAL_RANGES[key]
-        labels.append(short_labels[key])
-        user_vals.append(val)
-        norm_mins.append(norm_min)
-        norm_maxs.append(norm_max)
+
         if val > norm_max:
-            colors.append("#ef4444")
+            bar_color = "#ef4444"
             status = "⬆ Above Normal"
         elif val < norm_min:
-            colors.append("#60a5fa")
+            bar_color = "#60a5fa"
             status = "⬇ Below Normal"
         else:
-            colors.append("#22c55e")
+            bar_color = "#22c55e"
             status = "✓ Normal"
+
         val_str = f"{val:.2f}" if key in decimal_fields else f"{val:.0f}"
-        hover_texts.append(
-            f"<b>{key}</b><br>"
-            f"Your Value: <b>{val_str} {unit}</b><br>"
-            f"Normal Range: {norm_min}–{norm_max} {unit}<br>"
-            f"Status: {status}"
+        hover = f"<b>{val_str} {unit}</b><br>Normal: {norm_min}–{norm_max} {unit}<br>{status}"
+
+        # Normal band bar (background, full height of norm_max)
+        fig.add_trace(go.Bar(
+            x=[""],
+            y=[norm_max],
+            marker_color="rgba(245,197,24,0.18)",
+            marker_line=dict(color="rgba(245,197,24,0.5)", width=1),
+            width=0.6,
+            showlegend=(i == 0),
+            name="Normal Range",
+            hoverinfo="skip",
+        ), row=1, col=col_num)
+
+        # User value bar
+        fig.add_trace(go.Bar(
+            x=[""],
+            y=[val],
+            marker_color=bar_color,
+            marker_opacity=0.9,
+            marker_line=dict(width=0),
+            width=0.35,
+            showlegend=False,
+            hovertemplate=hover + "<extra></extra>",
+            text=[val_str],
+            textposition="outside",
+            textfont=dict(size=11, color=bar_color, family="Inter"),
+        ), row=1, col=col_num)
+
+        # Unit annotation below each subplot
+        fig.add_annotation(
+            text=unit if unit else "score",
+            x=0, y=-0.18,
+            xref=f"x{col_num}" if col_num > 1 else "x",
+            yref=f"y{col_num} domain" if col_num > 1 else "y domain",
+            showarrow=False,
+            font=dict(size=9, color="#888"),
+            xanchor="center",
         )
-
-    fig = go.Figure()
-
-    # Normal range band (as error bars visual — use shape boxes)
-    for i, key in enumerate(FIELD_ORDER):
-        norm_min, norm_max, unit = NORMAL_RANGES[key]
-        fig.add_shape(
-            type="rect",
-            x0=i - 0.4, x1=i + 0.4,
-            y0=norm_min, y1=norm_max,
-            fillcolor="rgba(245,197,24,0.15)",
-            line=dict(color="rgba(245,197,24,0.5)", width=1),
-            layer="below"
-        )
-
-    # User value bars
-    fig.add_trace(go.Bar(
-        x=list(range(len(FIELD_ORDER))),
-        y=user_vals,
-        marker_color=colors,
-        marker_opacity=0.9,
-        marker_line=dict(width=0),
-        hovertemplate="%{customdata}<extra></extra>",
-        customdata=hover_texts,
-        width=0.5,
-        showlegend=False,
-    ))
-
-    # Legend traces (dummy, for legend only)
-    fig.add_trace(go.Bar(x=[None], y=[None], marker_color="rgba(245,197,24,0.3)",
-                         name="Normal Range Band", showlegend=True))
-    fig.add_trace(go.Bar(x=[None], y=[None], marker_color="#22c55e",
-                         name="✓ Normal", showlegend=True))
-    fig.add_trace(go.Bar(x=[None], y=[None], marker_color="#ef4444",
-                         name="⬆ Above Normal", showlegend=True))
-    fig.add_trace(go.Bar(x=[None], y=[None], marker_color="#60a5fa",
-                         name="⬇ Below Normal", showlegend=True))
 
     fig.update_layout(
-        paper_bgcolor="rgba(15,20,40,0.0)",
+        paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(15,20,40,0.85)",
         font=dict(family="Inter, sans-serif", color="#c8cdd8"),
-        margin=dict(l=40, r=20, t=20, b=10),
-        height=340,
-        xaxis=dict(
-            tickmode="array",
-            tickvals=list(range(len(FIELD_ORDER))),
-            ticktext=labels,
-            tickfont=dict(size=11, color="#c8a84b"),
-            gridcolor="rgba(245,197,24,0.08)",
-            linecolor="rgba(245,197,24,0.3)",
-        ),
-        yaxis=dict(
-            gridcolor="rgba(245,197,24,0.1)",
-            tickfont=dict(size=10, color="#888"),
-            linecolor="rgba(245,197,24,0.2)",
-        ),
+        margin=dict(l=10, r=10, t=55, b=40),
+        height=320,
+        barmode="overlay",
+        showlegend=True,
         legend=dict(
             orientation="h",
-            yanchor="bottom", y=-0.35,
+            yanchor="bottom", y=-0.25,
             xanchor="center", x=0.5,
             font=dict(size=11, color="#c8cdd8"),
             bgcolor="rgba(0,0,0,0)",
         ),
-        bargap=0.3,
         hoverlabel=dict(
             bgcolor="#1e2a3a",
             bordercolor="#f5c518",
             font=dict(size=12, color="#f0e6c0"),
         ),
     )
+
+    # Style all subplots — only left y-axis, no right axis
+    for i in range(1, 8):
+        axis_num = "" if i == 1 else str(i)
+        fig.update_layout(**{
+            f"xaxis{axis_num}": dict(
+                showticklabels=False,
+                showgrid=False,
+                zeroline=False,
+                linecolor="rgba(245,197,24,0.2)",
+            ),
+            f"yaxis{axis_num}": dict(
+                showgrid=True,
+                gridcolor="rgba(245,197,24,0.08)",
+                tickfont=dict(size=9, color="#666"),
+                linecolor="rgba(245,197,24,0.15)",
+                zeroline=True,
+                zerolinecolor="rgba(245,197,24,0.3)",
+                side="left",
+                showticklabels=True,
+                nticks=4,
+            ),
+        })
+    # Hide secondary (right) y-axes that plotly auto-creates
+    fig.update_layout(yaxis2=dict(overlaying=None))
+
+    # Style subplot titles
+    for ann in fig.layout.annotations:
+        ann.font = dict(size=11, color="#c8a84b", family="Inter")
+        ann.y = 1.08
+
+    # Add color legend manually
+    fig.add_trace(go.Bar(x=[None], y=[None], marker_color="#22c55e", name="✓ Normal", showlegend=True))
+    fig.add_trace(go.Bar(x=[None], y=[None], marker_color="#ef4444", name="⬆ Above Normal", showlegend=True))
+    fig.add_trace(go.Bar(x=[None], y=[None], marker_color="#60a5fa", name="⬇ Below Normal", showlegend=True))
+
     return fig
+
 
 # ─── Helper: Generate Text Report (for download) ──────────────────────────────
 def generate_text_report(values_dict, prediction, confidence, timestamp):
